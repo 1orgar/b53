@@ -1,0 +1,93 @@
+[build-system]
+requires = ["hatchling>=1.25"]
+build-backend = "hatchling.build"
+
+[project]
+name = "b53"
+dynamic = ["version"]
+description = "Reversible 53-bit cryptographic packing of 1-50 booleans with hidden length and random nonce into an IEEE 754 double in [0.0, 1.0)"
+readme = "README.md"
+requires-python = ">=3.10"
+license = "MIT"
+authors = [
+    { name = "1orgar" },
+]
+keywords = [
+    "encryption",
+    "cipher",
+    "feistel",
+    "ieee754",
+    "double",
+    "boolean",
+    "bit-packing",
+    "format-preserving",
+    "hmac-sha256",
+]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Developers",
+    "Intended Audience :: Science/Research",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Programming Language :: Python :: 3.14",
+    "Topic :: Security :: Cryptography",
+    "Topic :: Software Development :: Libraries :: Python Modules",
+    "Typing :: Typed",
+]
+dependencies = []
+
+[project.optional-dependencies]
+dev = [
+    "build>=1.2",
+    "mypy>=1.11",
+    "pytest>=8.0",
+    "ruff>=0.8",
+    "twine>=6.1",
+]
+
+[project.scripts]
+b53 = "b53.cli:main"
+
+[project.urls]
+Homepage = "https://github.com/1orgar/b53"
+Repository = "https://github.com/1orgar/b53"
+Issues = "https://github.com/1orgar/b53/issues"
+
+[tool.hatch.version]
+path = "src/b53/__init__.py"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/b53"]
+
+[tool.hatch.build.targets.sdist]
+include = [
+    "/src",
+    "/tests",
+    "/README.md",
+    "/README_RU.md",
+    "/LICENSE",
+    "/pyproject.toml",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-ra"
+
+[tool.ruff]
+target-version = "py310"
+line-length = 100
+src = ["src", "tests"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "SIM", "RUF"]
+
+[tool.mypy]
+python_version = "3.10"
+strict = true
+packages = ["b53"]
+mypy_path = "src"

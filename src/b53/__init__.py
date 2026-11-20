@@ -1,0 +1,54 @@
+"""b53 — Reversible 53-bit cryptographic packing of bool[1..50] into IEEE 754 double."""
+
+from __future__ import annotations
+
+from b53.core import (
+    BASES,
+    DEFAULT_SALT_BYTES,
+    FEISTEL_ROUNDS,
+    LEFT_BITS,
+    MANTISSA_BITS,
+    MAX_LEN,
+    MIN_LEN,
+    MIN_SALT_BYTES,
+    NONCE_COUNTS,
+    RIGHT_BITS,
+    SIZES,
+    STATE_SPACE,
+    B53Cipher,
+    Cipher,
+    decrypt,
+    decrypt_bool_array,
+    encrypt,
+    encrypt_bool_array,
+    format_bits,
+    generate_salt,
+    parse_bits,
+)
+
+__version__ = "0.1.0"
+
+__all__ = [
+    "BASES",
+    "DEFAULT_SALT_BYTES",
+    "FEISTEL_ROUNDS",
+    "LEFT_BITS",
+    "MANTISSA_BITS",
+    "MAX_LEN",
+    "MIN_LEN",
+    "MIN_SALT_BYTES",
+    "NONCE_COUNTS",
+    "RIGHT_BITS",
+    "SIZES",
+    "STATE_SPACE",
+    "B53Cipher",
+    "Cipher",
+    "__version__",
+    "decrypt",
+    "decrypt_bool_array",
+    "encrypt",
+    "encrypt_bool_array",
+    "format_bits",
+    "generate_salt",
+    "parse_bits",
+]
