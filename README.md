@@ -41,6 +41,11 @@ assert x1 != x2
 # 3. Decrypt back to the exact original list[bool] and length
 assert b53.decrypt(x1, salt) == bits
 assert b53.decrypt(x2, salt) == bits
+
+# 4. Serialize/deserialize an arbitrary-length boolean array into list[float]
+many_bits = [i % 3 == 0 for i in range(250)]
+doubles = b53.serialize(many_bits, salt, min_size=10, max_size=30)
+assert b53.deserialize(doubles, salt) == many_bits
 ```
 
 For repeated operations with the same salt, use `B53Cipher` (alias `Cipher`):
@@ -52,6 +57,9 @@ cipher = B53Cipher(salt)
 encoded = cipher.encrypt_str("1011001011")
 print(repr(encoded))
 print(cipher.decrypt_str(encoded))  # "1011001011"
+
+doubles = cipher.serialize(many_bits)  # default min_size=10, max_size=30
+assert cipher.deserialize(doubles) == many_bits
 ```
 
 ### Command-Line Interface
@@ -106,9 +114,11 @@ When serializing the encrypted `double` to text, JSON, CSV, or CLI arguments, al
 - `generate_salt(num_bytes: int = 32) -> str` — generate a cryptographically random hex salt ($\ge 16$ bytes).
 - `encrypt(bits, salt) -> float` / `encrypt_bool_array(bits, salt) -> float` — encrypt $1..50$ booleans (or `0`/`1` ints) into a double in $[0.0, 1.0)$.
 - `decrypt(double_val, salt) -> list[bool]` / `decrypt_bool_array(double_val, salt) -> list[bool]` — recover the exact boolean list and length.
+- `serialize(bits, salt, min_size=10, max_size=30) -> list[float]` / `serialize_bool_array(...)` — split an arbitrary-length boolean sequence into chunks of random size in `[min_size, max_size]` ($1 \le \text{min\_size} \le \text{max\_size} \le 50$) and encrypt each chunk into a double.
+- `deserialize(values, salt) -> list[bool]` / `deserialize_bool_array(values, salt)` — restore the full boolean list from encrypted doubles.
 - `parse_bits(raw: str) -> list[bool]` — parse `"10110"` or `"true,false,1,0"`.
 - `format_bits(bits) -> str` — format booleans as `"10110"`.
-- `B53Cipher(salt)` (alias `Cipher`) — reusable cipher object with `.encrypt()`, `.decrypt()`, `.encrypt_str()`, `.decrypt_str()`, and `B53Cipher.generate()`.
+- `B53Cipher(salt)` (alias `Cipher`) — reusable cipher object with `.encrypt()`, `.decrypt()`, `.serialize()`, `.deserialize()`, `.encrypt_str()`, `.decrypt_str()`, and `B53Cipher.generate()`.
 
 ## Development
 

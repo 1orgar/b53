@@ -6,12 +6,15 @@ import hmac
 import math
 import secrets
 from bisect import bisect_right
-from collections.abc import Iterable, Mapping
+from collections.abc import Iterable, Mapping, Sequence
 
 MANTISSA_BITS = 53
 MIN_LEN = 1
 MAX_LEN = 50
 STATE_SPACE = 1 << MANTISSA_BITS
+
+DEFAULT_CHUNK_MIN = 10
+DEFAULT_CHUNK_MAX = 30
 
 LEFT_BITS = 26
 RIGHT_BITS = 27  # 26 + 27 = 53 bits
@@ -145,14 +148,23 @@ def _feistel_decrypt_53(value: int, key_bytes: bytes) -> int:
     return (left << RIGHT_BITS) | right
 
 
-def _encrypt_with_key(bits: Iterable[bool], key_bytes: bytes) -> float:
-    bools = _coerce_bits(bits, max_items=MAX_LEN)
-    length = len(bools)
-    if not (MIN_LEN <= length <= MAX_LEN):
+def _validate_chunk_bounds(min_size: int, max_size: int) -> None:
+    if isinstance(min_size, bool) or not isinstance(min_size, int):
+        raise TypeError(f"min_size must be int, got {type(min_size).__name__}.")
+    if isinstance(max_size, bool) or not isinstance(max_size, int):
+        raise TypeError(f"max_size must be int, got {type(max_size).__name__}.")
+    if min_size < MIN_LEN:
+        raise ValueError(f"min_size must be at least {MIN_LEN}, got {min_size}.")
+    if max_size > MAX_LEN:
+        raise ValueError(f"max_size must be at most {MAX_LEN}, got {max_size}.")
+    if min_size > max_size:
         raise ValueError(
-            f"Array length must be between {MIN_LEN} and {MAX_LEN} elements, got {length}."
+            f"min_size ({min_size}) must be less than or equal to max_size ({max_size})."
         )
 
+
+def _encrypt_chunk(bools: Sequence[bool], key_bytes: bytes) -> float:
+    length = len(bools)
     data_int = 0
     for idx, bit in enumerate(bools):
         if bit:
@@ -162,6 +174,47 @@ def _encrypt_with_key(bits: Iterable[bool], key_bytes: bytes) -> float:
     plain_53 = BASES[length] + (nonce << length) + data_int
     cipher_53 = _feistel_encrypt_53(plain_53, key_bytes)
     return math.ldexp(cipher_53, -MANTISSA_BITS)
+
+
+def _encrypt_with_key(bits: Iterable[bool], key_bytes: bytes) -> float:
+    bools = _coerce_bits(bits, max_items=MAX_LEN)
+    if not (MIN_LEN <= len(bools) <= MAX_LEN):
+        raise ValueError(
+            f"Array length must be between {MIN_LEN} and {MAX_LEN} elements, got {len(bools)}."
+        )
+    return _encrypt_chunk(bools, key_bytes)
+
+
+def _serialize_with_key(
+    bits: Iterable[bool],
+    key_bytes: bytes,
+    min_size: int = DEFAULT_CHUNK_MIN,
+    max_size: int = DEFAULT_CHUNK_MAX,
+) -> list[float]:
+    _validate_chunk_bounds(min_size, max_size)
+    bools = _coerce_bits(bits)
+    total = len(bools)
+    if total == 0:
+        return []
+
+    span = max_size - min_size + 1
+    result: list[float] = []
+    offset = 0
+    while offset < total:
+        chunk_size = min_size + secrets.randbelow(span)
+        chunk = bools[offset : offset + chunk_size]
+        result.append(_encrypt_chunk(chunk, key_bytes))
+        offset += len(chunk)
+    return result
+
+
+def _deserialize_with_key(values: Iterable[float], key_bytes: bytes) -> list[bool]:
+    if isinstance(values, (str, bytes, bytearray, memoryview, Mapping)):
+        raise TypeError("values must be a sequence or iterable of float doubles.")
+    result: list[bool] = []
+    for double_val in values:
+        result.extend(_decrypt_with_key(double_val, key_bytes))
+    return result
 
 
 def _decrypt_with_key(double_val: float, key_bytes: bytes) -> list[bool]:
@@ -252,6 +305,43 @@ def decrypt(double_val: float, salt: SaltType) -> list[bool]:
     return decrypt_bool_array(double_val, salt)
 
 
+def serialize_bool_array(
+    bits: Iterable[bool],
+    salt: SaltType,
+    min_size: int = DEFAULT_CHUNK_MIN,
+    max_size: int = DEFAULT_CHUNK_MAX,
+) -> list[float]:
+    """Serialize an arbitrary-length boolean sequence into a list of doubles in ``[0.0, 1.0)``.
+
+    Splits ``bits`` into consecutive chunks whose sizes are randomly sampled from
+    ``[min_size, max_size]`` (the final tail chunk may be shorter than ``min_size``),
+    encrypting each chunk into an IEEE 754 double.
+    """
+    key_bytes = _normalize_salt(salt)
+    return _serialize_with_key(bits, key_bytes, min_size=min_size, max_size=max_size)
+
+
+def deserialize_bool_array(values: Iterable[float], salt: SaltType) -> list[bool]:
+    """Deserialize a sequence of encrypted doubles back into the full boolean list."""
+    key_bytes = _normalize_salt(salt)
+    return _deserialize_with_key(values, key_bytes)
+
+
+def serialize(
+    bits: Iterable[bool],
+    salt: SaltType,
+    min_size: int = DEFAULT_CHUNK_MIN,
+    max_size: int = DEFAULT_CHUNK_MAX,
+) -> list[float]:
+    """Alias for :func:`serialize_bool_array`."""
+    return serialize_bool_array(bits, salt, min_size=min_size, max_size=max_size)
+
+
+def deserialize(values: Iterable[float], salt: SaltType) -> list[bool]:
+    """Alias for :func:`deserialize_bool_array`."""
+    return deserialize_bool_array(values, salt)
+
+
 class B53Cipher:
     """Reusable cipher bound to a normalized secret salt."""
 
@@ -274,6 +364,19 @@ class B53Cipher:
     def decrypt(self, double_val: float) -> list[bool]:
         """Decrypt a double in ``[0.0, 1.0)`` back into the original ``list[bool]``."""
         return _decrypt_with_key(double_val, self._key_bytes)
+
+    def serialize(
+        self,
+        bits: Iterable[bool],
+        min_size: int = DEFAULT_CHUNK_MIN,
+        max_size: int = DEFAULT_CHUNK_MAX,
+    ) -> list[float]:
+        """Serialize an arbitrary-length boolean sequence into a list of doubles."""
+        return _serialize_with_key(bits, self._key_bytes, min_size=min_size, max_size=max_size)
+
+    def deserialize(self, values: Iterable[float]) -> list[bool]:
+        """Deserialize a sequence of encrypted doubles back into the full boolean list."""
+        return _deserialize_with_key(values, self._key_bytes)
 
     def encrypt_str(self, raw_bits: str) -> float:
         """Parse a bit string (e.g. ``'10110'``) and encrypt it."""

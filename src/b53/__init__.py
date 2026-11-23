@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from b53.core import (
     BASES,
+    DEFAULT_CHUNK_MAX,
+    DEFAULT_CHUNK_MIN,
     DEFAULT_SALT_BYTES,
     FEISTEL_ROUNDS,
     LEFT_BITS,
@@ -19,17 +21,23 @@ from b53.core import (
     Cipher,
     decrypt,
     decrypt_bool_array,
+    deserialize,
+    deserialize_bool_array,
     encrypt,
     encrypt_bool_array,
     format_bits,
     generate_salt,
     parse_bits,
+    serialize,
+    serialize_bool_array,
 )
 
 __version__ = "0.1.0"
 
 __all__ = [
     "BASES",
+    "DEFAULT_CHUNK_MAX",
+    "DEFAULT_CHUNK_MIN",
     "DEFAULT_SALT_BYTES",
     "FEISTEL_ROUNDS",
     "LEFT_BITS",
@@ -46,9 +54,13 @@ __all__ = [
     "__version__",
     "decrypt",
     "decrypt_bool_array",
+    "deserialize",
+    "deserialize_bool_array",
     "encrypt",
     "encrypt_bool_array",
     "format_bits",
     "generate_salt",
     "parse_bits",
+    "serialize",
+    "serialize_bool_array",
 ]
