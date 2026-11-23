@@ -22,6 +22,9 @@
 
 ```bash
 pip install b53
+
+# Optional: asymmetric X25519 extension (b53a / b53.asymmetric)
+pip install "b53[asymmetric]"
 ```
 
 ## Quick Start
@@ -65,6 +68,31 @@ print(cipher.decrypt_str(encoded))  # "1011001011"
 
 doubles = cipher.serialize(many_bits)  # default min_size=10
 assert cipher.deserialize(doubles) == many_bits
+```
+
+### Asymmetric Mode (`b53a` / `b53.asymmetric`)
+
+Requires `pip install "b53[asymmetric]"`. Uses `X25519` + `HKDF-SHA256` without embedding keys into the `double` output:
+
+```python
+import b53a  # or: from b53 import b53a
+
+bob = b53a.generate_keypair()
+
+# 1. One-way sealed session: encryptor only needs bob.public_key;
+#    capsule is stored separately from the double payloads.
+enc, capsule = b53a.seal_session(bob.public_key, context="table:flags")
+d = enc.encrypt([True, False, True, True])        # 1 exact double in [0.0, 1.0)
+ds = enc.serialize([True, False] * 15)            # fixed-count list[float]
+
+dec = b53a.open_session(capsule, bob.private_key, context="table:flags")
+assert dec.decrypt(d) == [True, False, True, True]
+assert dec.deserialize(ds) == [True, False] * 15
+
+# 2. Pairwise X25519 (no capsule needed when both sides hold keypairs)
+alice = b53a.generate_keypair()
+x = b53a.encrypt([True, False, True], alice.private_key, bob.public_key)
+assert b53a.decrypt(x, bob.private_key, alice.public_key) == [True, False, True]
 ```
 
 ### Command-Line Interface

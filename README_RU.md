@@ -22,6 +22,9 @@
 
 ```bash
 pip install b53
+
+# Опционально: асимметричное расширение X25519 (b53a / b53.asymmetric)
+pip install "b53[asymmetric]"
 ```
 
 ## Быстрый старт
@@ -65,6 +68,31 @@ print(cipher.decrypt_str(encoded))  # "1011001011"
 
 doubles = cipher.serialize(many_bits)  # по умолчанию min_size=10
 assert cipher.deserialize(doubles) == many_bits
+```
+
+### Асимметричный режим (`b53a` / `b53.asymmetric`)
+
+Требует `pip install "b53[asymmetric]"`. Использует `X25519` + `HKDF-SHA256`, не добавляя эфемерные ключи внутрь массива `double`:
+
+```python
+import b53a  # или: from b53 import b53a
+
+bob = b53a.generate_keypair()
+
+# 1. Односторонняя сессия: шифрующая сторона знает только bob.public_key,
+#    капсула передаётся отдельно от выходных double.
+enc, capsule = b53a.seal_session(bob.public_key, context="table:flags")
+d = enc.encrypt([True, False, True, True])        # 1 точный double в [0.0, 1.0)
+ds = enc.serialize([True, False] * 15)            # фиксированный list[float]
+
+dec = b53a.open_session(capsule, bob.private_key, context="table:flags")
+assert dec.decrypt(d) == [True, False, True, True]
+assert dec.deserialize(ds) == [True, False] * 15
+
+# 2. Парный обмен X25519 (без капсулы, когда у обеих сторон есть пары ключей)
+alice = b53a.generate_keypair()
+x = b53a.encrypt([True, False, True], alice.private_key, bob.public_key)
+assert b53a.decrypt(x, bob.private_key, alice.public_key) == [True, False, True]
 ```
 
 ### CLI
