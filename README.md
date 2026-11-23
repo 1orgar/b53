@@ -112,13 +112,14 @@ When serializing the encrypted `double` to text, JSON, CSV, or CLI arguments, al
 ## API Reference
 
 - `generate_salt(num_bytes: int = 32) -> str` — generate a cryptographically random hex salt ($\ge 16$ bytes).
+- `derive_salt(password, context=None, *, num_bytes=32, n=32768, r=8, p=1, maxmem=...) -> str` — stretch a human password/passphrase into a hex salt via stdlib `hashlib.scrypt` (RFC 7914).
 - `encrypt(bits, salt) -> float` / `encrypt_bool_array(bits, salt) -> float` — encrypt $1..50$ booleans (or `0`/`1` ints) into a double in $[0.0, 1.0)$.
 - `decrypt(double_val, salt) -> list[bool]` / `decrypt_bool_array(double_val, salt) -> list[bool]` — recover the exact boolean list and length.
 - `serialize(bits, salt, min_size=10) -> list[float]` / `serialize_bool_array(...)` — split an arbitrary-length boolean sequence into a fixed number of chunks `(len(bits) // min_size) + 1` of random sizes in `[1, min_size]` (first chunk strictly `< min_size`, $2 \le \text{min\_size} \le 50$) and encrypt them using a chained per-chunk salt (`HMAC-SHA256` over total chunk count for chunk 0, then previous seed + index + previous chunk size) so individual doubles cannot be decrypted in isolation.
 - `deserialize(values, salt) -> list[bool]` / `deserialize_bool_array(values, salt)` — verify and restore the full boolean list from chained doubles.
 - `parse_bits(raw: str) -> list[bool]` — parse `"10110"` or `"true,false,1,0"`.
 - `format_bits(bits) -> str` — format booleans as `"10110"`.
-- `B53Cipher(salt)` (alias `Cipher`) — reusable cipher object with `.encrypt()`, `.decrypt()`, `.serialize()`, `.deserialize()`, `.encrypt_str()`, `.decrypt_str()`, and `B53Cipher.generate()`.
+- `B53Cipher(salt)` (alias `Cipher`) — reusable cipher object with `.encrypt()`, `.decrypt()`, `.serialize()`, `.deserialize()`, `.encrypt_str()`, `.decrypt_str()`, `B53Cipher.generate()`, and `B53Cipher.from_password(password, context=...)`.
 
 ## Development
 

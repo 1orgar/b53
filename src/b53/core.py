@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import hmac
 import math
 import secrets
@@ -24,6 +25,11 @@ FEISTEL_ROUNDS = 8
 
 MIN_SALT_BYTES = 16
 DEFAULT_SALT_BYTES = 32
+
+DEFAULT_SCRYPT_N = 1 << 15  # 32768 (~32 MiB at r=8, p=1)
+DEFAULT_SCRYPT_R = 8
+DEFAULT_SCRYPT_P = 1
+DEFAULT_SCRYPT_MAXMEM = 128 * 1024 * 1024  # 128 MiB cap
 
 _CSPRNG = secrets.SystemRandom()
 
@@ -314,6 +320,74 @@ def generate_salt(num_bytes: int = DEFAULT_SALT_BYTES) -> str:
     return secrets.token_hex(num_bytes)
 
 
+def _coerce_kdf_input(value: SaltType, *, label: str) -> bytes:
+    if isinstance(value, (bytes, bytearray)):
+        raw = bytes(value)
+        if not raw:
+            raise ValueError(f"{label} must not be empty.")
+        return raw
+    if isinstance(value, str):
+        if not value:
+            raise ValueError(f"{label} must not be empty.")
+        return value.encode("utf-8")
+    raise TypeError(f"{label} must be str or bytes, got {type(value).__name__}.")
+
+
+def _require_int(value: int, *, label: str) -> int:
+    if isinstance(value, bool) or not isinstance(value, int):
+        raise TypeError(f"{label} must be int, got {type(value).__name__}.")
+    return value
+
+
+def derive_salt(
+    password: SaltType,
+    context: SaltType | None = None,
+    *,
+    num_bytes: int = DEFAULT_SALT_BYTES,
+    n: int = DEFAULT_SCRYPT_N,
+    r: int = DEFAULT_SCRYPT_R,
+    p: int = DEFAULT_SCRYPT_P,
+    maxmem: int = DEFAULT_SCRYPT_MAXMEM,
+) -> str:
+    """Stretch a password into a hex-encoded ``b53`` salt using ``scrypt`` (RFC 7914)."""
+    pw_bytes = _coerce_kdf_input(password, label="Password")
+    if context is None:
+        scrypt_salt = b"b53:scrypt:v1"
+    else:
+        scrypt_salt = b"b53:scrypt:v1:" + _coerce_kdf_input(context, label="Context")
+
+    dklen = _require_int(num_bytes, label="num_bytes")
+    if dklen < MIN_SALT_BYTES:
+        raise ValueError(
+            f"Salt size must be at least {MIN_SALT_BYTES} bytes (128 bits), got {dklen}."
+        )
+
+    cost_n = _require_int(n, label="n")
+    block_r = _require_int(r, label="r")
+    parallel_p = _require_int(p, label="p")
+    mem_limit = _require_int(maxmem, label="maxmem")
+
+    if cost_n < 2 or (cost_n & (cost_n - 1)) != 0:
+        raise ValueError(f"scrypt parameter n must be a power of 2 >= 2, got {cost_n}.")
+    if block_r < 1:
+        raise ValueError(f"scrypt parameter r must be >= 1, got {block_r}.")
+    if parallel_p < 1:
+        raise ValueError(f"scrypt parameter p must be >= 1, got {parallel_p}.")
+    if mem_limit < 0:
+        raise ValueError(f"scrypt parameter maxmem must be >= 0, got {mem_limit}.")
+
+    derived = hashlib.scrypt(
+        pw_bytes,
+        salt=scrypt_salt,
+        n=cost_n,
+        r=block_r,
+        p=parallel_p,
+        maxmem=mem_limit,
+        dklen=dklen,
+    )
+    return derived.hex()
+
+
 def parse_bits(raw: str) -> list[bool]:
     """Parse a bit string (e.g. ``'1011001'``) or comma-separated booleans into ``list[bool]``."""
     if not isinstance(raw, str):
@@ -417,6 +491,30 @@ class B53Cipher:
         """Generate a new random salt and return ``(cipher, salt_hex)``."""
         salt = generate_salt(num_bytes)
         return cls(salt), salt
+
+    @classmethod
+    def from_password(
+        cls,
+        password: SaltType,
+        context: SaltType | None = None,
+        *,
+        num_bytes: int = DEFAULT_SALT_BYTES,
+        n: int = DEFAULT_SCRYPT_N,
+        r: int = DEFAULT_SCRYPT_R,
+        p: int = DEFAULT_SCRYPT_P,
+        maxmem: int = DEFAULT_SCRYPT_MAXMEM,
+    ) -> B53Cipher:
+        """Stretch a password with ``scrypt`` and return a ready-to-use ``B53Cipher``."""
+        salt = derive_salt(
+            password,
+            context=context,
+            num_bytes=num_bytes,
+            n=n,
+            r=r,
+            p=p,
+            maxmem=maxmem,
+        )
+        return cls(salt)
 
     def encrypt(self, bits: Iterable[bool]) -> float:
         """Encrypt 1..50 booleans into a double in ``[0.0, 1.0)``."""

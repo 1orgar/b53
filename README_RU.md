@@ -29,8 +29,9 @@ pip install b53
 ```python
 import b53
 
-# 1. Генерация 256-битной соли-ключа
+# 1. Генерация 256-битной соли-ключа (или key stretching из пароля через scrypt)
 salt = b53.generate_salt()
+# salt = b53.derive_salt("my-passphrase", context="user:42")
 
 # 2. Шифрование массива bool (1..50 элементов) в double [0.0, 1.0)
 bits = [True, False, True, True, False, False, True, False, True, True]
