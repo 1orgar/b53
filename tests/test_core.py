@@ -229,4 +229,4 @@ def test_parse_and_format_bits() -> None:
 
 def test_public_exports() -> None:
     assert hasattr(b53, "__version__")
-    assert b53.__version__ == "0.1.0"
+    assert b53.__version__ == "0.2.0"
