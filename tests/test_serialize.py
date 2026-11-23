@@ -1,13 +1,15 @@
-"""Tests for arbitrary-length boolean array serialization and deserialization."""
+"""Tests for chained arbitrary-length boolean array serialization and deserialization."""
 
 from __future__ import annotations
 
 import math
 import random
+import secrets
 from typing import Any, cast
 
 import pytest
 
+import b53.core as core_mod
 from b53 import (
     DEFAULT_CHUNK_MIN,
     MAX_LEN,
@@ -20,11 +22,38 @@ from b53 import (
     serialize,
     serialize_bool_array,
 )
+from b53.core import (
+    _decrypt_with_key,
+    _derive_initial_seed,
+    _derive_next_seed,
+    _normalize_salt,
+    _plan_chunk_sizes,
+)
+
+
+def _chained_chunk_lengths(doubles: list[float], salt: str) -> list[int]:
+    """Helper verifying chunk lengths by stepping through the seed chain."""
+    key_bytes = _normalize_salt(salt)
+    seed = _derive_initial_seed(key_bytes, len(doubles))
+    lengths: list[int] = []
+    prev_len = 0
+    for idx, val in enumerate(doubles):
+        if idx > 0:
+            seed = _derive_next_seed(key_bytes, seed, idx, prev_len)
+        bits = _decrypt_with_key(val, seed)
+        prev_len = len(bits)
+        lengths.append(prev_len)
+    return lengths
 
 
 def test_default_constants() -> None:
     assert DEFAULT_CHUNK_MIN == 10
     assert MIN_SPLIT_SIZE == 2
+
+
+def test_csprng_used_exclusively_in_package() -> None:
+    assert isinstance(core_mod._CSPRNG, secrets.SystemRandom)
+    assert "random" not in vars(core_mod)
 
 
 def test_serialize_deserialize_various_lengths() -> None:
@@ -47,30 +76,14 @@ def test_serialize_deserialize_various_lengths() -> None:
         assert deserialize(serialize(bits, salt), salt) == bits
 
 
-def test_fixed_chunk_count_and_first_chunk_never_equals_min_size() -> None:
-    salt = generate_salt()
-
+def test_planner_fixed_count_and_first_chunk_bound() -> None:
     for min_size in (2, 3, 10, 50):
-        sample_lengths = [
-            1,
-            min_size - 1,
-            min_size,
-            min_size + 1,
-            min_size + 2,
-            2 * min_size - 1,
-            2 * min_size,
-            3 * min_size,
-        ]
-        for total in sample_lengths:
-            bits = [i % 2 == 0 for i in range(total)]
-            doubles = serialize(bits, salt, min_size=min_size)
-            chunk_lengths = [len(decrypt(d, salt)) for d in doubles]
-
-            assert len(chunk_lengths) == (total // min_size) + 1
-            assert sum(chunk_lengths) == total
-            assert 1 <= chunk_lengths[0] < min_size
-            assert all(1 <= size <= min_size for size in chunk_lengths[1:])
-            assert deserialize(doubles, salt) == bits
+        for total in range(1, 105):
+            sizes = _plan_chunk_sizes(total, min_size)
+            assert len(sizes) == (total // min_size) + 1
+            assert sum(sizes) == total
+            assert 1 <= sizes[0] < min_size
+            assert all(1 <= size <= min_size for size in sizes[1:])
 
 
 def test_twelve_elements_with_min_size_10_example() -> None:
@@ -80,7 +93,7 @@ def test_twelve_elements_with_min_size_10_example() -> None:
     seen_splits: set[tuple[int, ...]] = set()
     for _ in range(40):
         doubles = serialize(bits, salt, min_size=10)
-        lengths = tuple(len(decrypt(d, salt)) for d in doubles)
+        lengths = tuple(_chained_chunk_lengths(doubles, salt))
         assert len(lengths) == 2
         assert sum(lengths) == 12
         assert 1 <= lengths[0] < 10
@@ -88,7 +101,6 @@ def test_twelve_elements_with_min_size_10_example() -> None:
         assert deserialize(doubles, salt) == bits
         seen_splits.add(lengths)
 
-    # Random splits in [2, 9] x [3, 10] should vary across runs.
     assert len(seen_splits) > 1
 
 
@@ -100,7 +112,7 @@ def test_divisible_lengths_add_extra_chunk_with_random_sizes() -> None:
         seen_splits: set[tuple[int, ...]] = set()
         for _ in range(30):
             doubles = serialize(bits, salt, min_size=10)
-            lengths = tuple(len(decrypt(d, salt)) for d in doubles)
+            lengths = tuple(_chained_chunk_lengths(doubles, salt))
             assert len(lengths) == (total // 10) + 1
             assert sum(lengths) == total
             assert 1 <= lengths[0] < 10
@@ -111,17 +123,43 @@ def test_divisible_lengths_add_extra_chunk_with_random_sizes() -> None:
         assert len(seen_splits) > 1
 
 
-def test_exhaustive_lengths_and_bounds_on_planner() -> None:
+def test_cannot_decrypt_individual_chunks_or_tampered_sequences() -> None:
     salt = generate_salt()
-    for total in range(1, 105):
-        bits = [bool(i & 1) for i in range(total)]
-        doubles = serialize(bits, salt, min_size=10)
-        lengths = [len(decrypt(d, salt)) for d in doubles]
-        assert len(lengths) == (total // 10) + 1
-        assert sum(lengths) == total
-        assert 1 <= lengths[0] < 10
-        assert all(1 <= size <= 10 for size in lengths[1:])
-        assert deserialize(doubles, salt) == bits
+
+    # Even for a single-chunk array (K=1), seed_0 differs from raw salt.
+    short_bits = [True, False, True, True, False]
+    mismatches_single = sum(
+        1
+        for _ in range(10)
+        if decrypt(serialize(short_bits, salt, min_size=10)[0], salt) != short_bits
+    )
+    assert mismatches_single == 10
+
+    # Multi-chunk array: cannot decrypt any chunk alone, nor truncate, drop, or reorder.
+    bits = [i % 3 == 0 for i in range(45)]
+    doubles = serialize(bits, salt, min_size=10)
+    assert len(doubles) == 5
+
+    # Partition original bits using the real chunk lengths for negative assertions.
+    chunk_lens = _chained_chunk_lengths(doubles, salt)
+    chunks: list[list[bool]] = []
+    pos = 0
+    for size in chunk_lens:
+        chunks.append(bits[pos : pos + size])
+        pos += size
+
+    for idx, d in enumerate(doubles):
+        assert decrypt(d, salt) != chunks[idx]
+        assert deserialize([d], salt) != chunks[idx]
+
+    # Truncation changes total_chunks -> breaks seed_0 and all subsequent chunks.
+    assert deserialize(doubles[:-1], salt) != bits[: sum(chunk_lens[:-1])]
+    # Dropping chunk 0 shifts indices and breaks the seed chain.
+    assert deserialize(doubles[1:], salt) != bits[chunk_lens[0] :]
+    # Swapping chunks breaks chaining.
+    swapped = list(doubles)
+    swapped[1], swapped[2] = swapped[2], swapped[1]
+    assert deserialize(swapped, salt) != bits
 
 
 def test_cipher_methods_and_generators() -> None:

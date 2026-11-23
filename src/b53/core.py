@@ -25,6 +25,8 @@ FEISTEL_ROUNDS = 8
 MIN_SALT_BYTES = 16
 DEFAULT_SALT_BYTES = 32
 
+_CSPRNG = secrets.SystemRandom()
+
 SaltType = str | bytes | bytearray
 
 
@@ -173,7 +175,7 @@ def _plan_chunk_sizes(total: int, min_size: int) -> list[int]:
     sizes = [0] * num_chunks
 
     order = list(range(num_chunks))
-    secrets.SystemRandom().shuffle(order)
+    _CSPRNG.shuffle(order)
 
     remaining = total
     rem_min = num_chunks
@@ -215,6 +217,28 @@ def _encrypt_with_key(bits: Iterable[bool], key_bytes: bytes) -> float:
     return _encrypt_chunk(bools, key_bytes)
 
 
+def _derive_initial_seed(key_bytes: bytes, total_chunks: int) -> bytes:
+    """Derive the 256-bit modified salt for chunk 0, bound to total chunk count."""
+    msg = b"b53:chain:v1:init" + total_chunks.to_bytes(8, "big")
+    return hmac.digest(key_bytes, msg, "sha256")
+
+
+def _derive_next_seed(
+    key_bytes: bytes,
+    prev_seed: bytes,
+    chunk_idx: int,
+    prev_chunk_len: int,
+) -> bytes:
+    """Derive the modified salt for chunk ``chunk_idx`` from the previous seed and size."""
+    msg = (
+        b"b53:chain:v1:step"
+        + prev_seed
+        + chunk_idx.to_bytes(8, "big")
+        + prev_chunk_len.to_bytes(1, "big")
+    )
+    return hmac.digest(key_bytes, msg, "sha256")
+
+
 def _serialize_with_key(
     bits: Iterable[bool],
     key_bytes: bytes,
@@ -223,11 +247,16 @@ def _serialize_with_key(
     _validate_min_size(min_size)
     bools = _coerce_bits(bits)
     chunk_sizes = _plan_chunk_sizes(len(bools), min_size)
+    if not chunk_sizes:
+        return []
 
+    seed = _derive_initial_seed(key_bytes, len(chunk_sizes))
     result: list[float] = []
     offset = 0
-    for size in chunk_sizes:
-        result.append(_encrypt_chunk(bools[offset : offset + size], key_bytes))
+    for idx, size in enumerate(chunk_sizes):
+        if idx > 0:
+            seed = _derive_next_seed(key_bytes, seed, idx, chunk_sizes[idx - 1])
+        result.append(_encrypt_chunk(bools[offset : offset + size], seed))
         offset += size
     return result
 
@@ -235,9 +264,19 @@ def _serialize_with_key(
 def _deserialize_with_key(values: Iterable[float], key_bytes: bytes) -> list[bool]:
     if isinstance(values, (str, bytes, bytearray, memoryview, Mapping)):
         raise TypeError("values must be a sequence or iterable of float doubles.")
+    double_list = list(values)
+    if not double_list:
+        return []
+
+    seed = _derive_initial_seed(key_bytes, len(double_list))
     result: list[bool] = []
-    for double_val in values:
-        result.extend(_decrypt_with_key(double_val, key_bytes))
+    prev_len = 0
+    for idx, double_val in enumerate(double_list):
+        if idx > 0:
+            seed = _derive_next_seed(key_bytes, seed, idx, prev_len)
+        chunk_bits = _decrypt_with_key(double_val, seed)
+        prev_len = len(chunk_bits)
+        result.extend(chunk_bits)
     return result
 
 
