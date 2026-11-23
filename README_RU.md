@@ -44,7 +44,7 @@ assert b53.decrypt(x2, salt) == bits
 
 # 4. Сериализация и десериализация массива bool произвольной длины в list[float]
 many_bits = [i % 3 == 0 for i in range(250)]
-doubles = b53.serialize(many_bits, salt, min_size=10, max_size=30)
+doubles = b53.serialize(many_bits, salt, min_size=10)
 assert b53.deserialize(doubles, salt) == many_bits
 ```
 
@@ -58,7 +58,7 @@ encoded = cipher.encrypt_str("1011001011")
 print(repr(encoded))
 print(cipher.decrypt_str(encoded))  # "1011001011"
 
-doubles = cipher.serialize(many_bits)  # по умолчанию min_size=10, max_size=30
+doubles = cipher.serialize(many_bits)  # по умолчанию min_size=10
 assert cipher.deserialize(doubles) == many_bits
 ```
 

@@ -14,7 +14,7 @@ MAX_LEN = 50
 STATE_SPACE = 1 << MANTISSA_BITS
 
 DEFAULT_CHUNK_MIN = 10
-DEFAULT_CHUNK_MAX = 30
+MIN_SPLIT_SIZE = 2
 
 LEFT_BITS = 26
 RIGHT_BITS = 27  # 26 + 27 = 53 bits
@@ -148,19 +148,49 @@ def _feistel_decrypt_53(value: int, key_bytes: bytes) -> int:
     return (left << RIGHT_BITS) | right
 
 
-def _validate_chunk_bounds(min_size: int, max_size: int) -> None:
+def _validate_min_size(min_size: int) -> None:
     if isinstance(min_size, bool) or not isinstance(min_size, int):
         raise TypeError(f"min_size must be int, got {type(min_size).__name__}.")
-    if isinstance(max_size, bool) or not isinstance(max_size, int):
-        raise TypeError(f"max_size must be int, got {type(max_size).__name__}.")
-    if min_size < MIN_LEN:
-        raise ValueError(f"min_size must be at least {MIN_LEN}, got {min_size}.")
-    if max_size > MAX_LEN:
-        raise ValueError(f"max_size must be at most {MAX_LEN}, got {max_size}.")
-    if min_size > max_size:
+    if not (MIN_SPLIT_SIZE <= min_size <= MAX_LEN):
         raise ValueError(
-            f"min_size ({min_size}) must be less than or equal to max_size ({max_size})."
+            f"min_size must be between {MIN_SPLIT_SIZE} and {MAX_LEN}, got {min_size}."
         )
+
+
+def _plan_chunk_sizes(total: int, min_size: int) -> list[int]:
+    """Compute random chunk sizes for a fixed chunk count ``K = (total // min_size) + 1``.
+
+    Guarantees:
+    - ``c[0]`` is strictly less than ``min_size`` (``1 <= c[0] <= min_size - 1``).
+    - All subsequent chunks satisfy ``1 <= c[i] <= min_size``.
+    - ``sum(c) == total``.
+    """
+    if total == 0:
+        return []
+
+    num_chunks = (total // min_size) + 1
+    caps = [min_size - 1] + [min_size] * (num_chunks - 1)
+    sizes = [0] * num_chunks
+
+    order = list(range(num_chunks))
+    secrets.SystemRandom().shuffle(order)
+
+    remaining = total
+    rem_min = num_chunks
+    rem_max = sum(caps)
+
+    for idx in order:
+        cap = caps[idx]
+        rem_min -= 1
+        rem_max -= cap
+
+        lo = max(1, remaining - rem_max)
+        hi = min(cap, remaining - rem_min)
+        chosen = lo + secrets.randbelow(hi - lo + 1)
+        sizes[idx] = chosen
+        remaining -= chosen
+
+    return sizes
 
 
 def _encrypt_chunk(bools: Sequence[bool], key_bytes: bytes) -> float:
@@ -189,22 +219,16 @@ def _serialize_with_key(
     bits: Iterable[bool],
     key_bytes: bytes,
     min_size: int = DEFAULT_CHUNK_MIN,
-    max_size: int = DEFAULT_CHUNK_MAX,
 ) -> list[float]:
-    _validate_chunk_bounds(min_size, max_size)
+    _validate_min_size(min_size)
     bools = _coerce_bits(bits)
-    total = len(bools)
-    if total == 0:
-        return []
+    chunk_sizes = _plan_chunk_sizes(len(bools), min_size)
 
-    span = max_size - min_size + 1
     result: list[float] = []
     offset = 0
-    while offset < total:
-        chunk_size = min_size + secrets.randbelow(span)
-        chunk = bools[offset : offset + chunk_size]
-        result.append(_encrypt_chunk(chunk, key_bytes))
-        offset += len(chunk)
+    for size in chunk_sizes:
+        result.append(_encrypt_chunk(bools[offset : offset + size], key_bytes))
+        offset += size
     return result
 
 
@@ -309,16 +333,15 @@ def serialize_bool_array(
     bits: Iterable[bool],
     salt: SaltType,
     min_size: int = DEFAULT_CHUNK_MIN,
-    max_size: int = DEFAULT_CHUNK_MAX,
 ) -> list[float]:
-    """Serialize an arbitrary-length boolean sequence into a list of doubles in ``[0.0, 1.0)``.
+    """Serialize an arbitrary-length boolean sequence into a fixed-count list of doubles.
 
-    Splits ``bits`` into consecutive chunks whose sizes are randomly sampled from
-    ``[min_size, max_size]`` (the final tail chunk may be shorter than ``min_size``),
-    encrypting each chunk into an IEEE 754 double.
+    Splits ``bits`` into ``(len(bits) // min_size) + 1`` sequential chunks (or ``0``
+    if empty) of random lengths in ``[1, min_size]``, where the first chunk is strictly
+    shorter than ``min_size`` (``1 <= len(chunk[0]) < min_size``), and encrypts each chunk.
     """
     key_bytes = _normalize_salt(salt)
-    return _serialize_with_key(bits, key_bytes, min_size=min_size, max_size=max_size)
+    return _serialize_with_key(bits, key_bytes, min_size=min_size)
 
 
 def deserialize_bool_array(values: Iterable[float], salt: SaltType) -> list[bool]:
@@ -331,10 +354,9 @@ def serialize(
     bits: Iterable[bool],
     salt: SaltType,
     min_size: int = DEFAULT_CHUNK_MIN,
-    max_size: int = DEFAULT_CHUNK_MAX,
 ) -> list[float]:
     """Alias for :func:`serialize_bool_array`."""
-    return serialize_bool_array(bits, salt, min_size=min_size, max_size=max_size)
+    return serialize_bool_array(bits, salt, min_size=min_size)
 
 
 def deserialize(values: Iterable[float], salt: SaltType) -> list[bool]:
@@ -369,10 +391,9 @@ class B53Cipher:
         self,
         bits: Iterable[bool],
         min_size: int = DEFAULT_CHUNK_MIN,
-        max_size: int = DEFAULT_CHUNK_MAX,
     ) -> list[float]:
         """Serialize an arbitrary-length boolean sequence into a list of doubles."""
-        return _serialize_with_key(bits, self._key_bytes, min_size=min_size, max_size=max_size)
+        return _serialize_with_key(bits, self._key_bytes, min_size=min_size)
 
     def deserialize(self, values: Iterable[float]) -> list[bool]:
         """Deserialize a sequence of encrypted doubles back into the full boolean list."""

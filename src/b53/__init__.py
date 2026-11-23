@@ -4,7 +4,6 @@ from __future__ import annotations
 
 from b53.core import (
     BASES,
-    DEFAULT_CHUNK_MAX,
     DEFAULT_CHUNK_MIN,
     DEFAULT_SALT_BYTES,
     FEISTEL_ROUNDS,
@@ -13,6 +12,7 @@ from b53.core import (
     MAX_LEN,
     MIN_LEN,
     MIN_SALT_BYTES,
+    MIN_SPLIT_SIZE,
     NONCE_COUNTS,
     RIGHT_BITS,
     SIZES,
@@ -36,7 +36,6 @@ __version__ = "0.1.0"
 
 __all__ = [
     "BASES",
-    "DEFAULT_CHUNK_MAX",
     "DEFAULT_CHUNK_MIN",
     "DEFAULT_SALT_BYTES",
     "FEISTEL_ROUNDS",
@@ -45,6 +44,7 @@ __all__ = [
     "MAX_LEN",
     "MIN_LEN",
     "MIN_SALT_BYTES",
+    "MIN_SPLIT_SIZE",
     "NONCE_COUNTS",
     "RIGHT_BITS",
     "SIZES",
